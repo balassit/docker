@@ -1,0 +1,18 @@
+
+dist: bionic
+sudo: false
+
+language: python
+
+services:
+  - docker
+
+python:
+  - "3.6"
+# command to install dependencies
+install:
+  - 'pip install pipenv'
+# command to run tests
+script:
+  - echo "$DOCKER_PASSWORD" | docker login -u "$DOCKER_USERNAME" --password-stdin
+  - make deploy

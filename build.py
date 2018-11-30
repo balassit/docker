@@ -11,11 +11,6 @@ try:
 except:
     from pip._internal import main as pipmain
 
-def install(package):
-    """installs packages"""
-    pipmain(['install', package, '-q'])
-
-
 def read_dockerfile_for_args(target):
     """Reads a dockerfile to get all ARGs and pulls values from dockerfile or environment"""
     import colorama
@@ -56,6 +51,28 @@ def read_dockerfile_for_args(target):
 
     return build_args
 
+def parseCommit() -> str:
+    """parse the last commit for the files that were changed"""
+    cmd_tag = f"git --no-pager diff --diff-filter=ACMR --name-only HEAD~1 HEAD"
+    print(f"COMMAND: {cmd_tag}")
+    print("", flush=True)
+    fileList = subprocess.check_output(cmd_tag, shell=True)
+    return fileList.decode('utf-8').splitlines()
+
+def getDockerfiles(fileList) -> dict:
+    """Get image and tag for dockerfiles"""
+    paths = {}
+    for word in fileList:
+        if "/Dockerfile" in word:
+            try:
+                path = word.split('/')
+                image = path[0]
+                tag = path[1]
+                paths[len(paths)] = (image, tag)
+            except IndexError: 
+                print("Image name and tag are required in path as \'image/tag/Dockerfile\'")
+    print(paths)
+    return paths   
 
 def tag(image_name, new_image_name):
     """tags images"""
@@ -79,40 +96,10 @@ def push(args, image_name_tag):
             exit(f"Error with {cmd_push}")
     return 0
 
-
-def do_version_tag(args, image_name_tag, image_name):
-    """do version tag and push"""
-    if args.versiontag is True:
-        date_stamp = "{:%Y%m%d%H%M%S}".format(datetime.now())
-        version_tag = args.tag + '-' + date_stamp
-        image_name_version_tag = f"{image_name}:{version_tag}"
-        return_code = tag(image_name_tag, image_name_version_tag)
-        if return_code == 0:
-            push(args, image_name_version_tag)
-
-
-def do_latest_tag(args, image_name_tag, image_name):
-    """do latest tag and push"""
-    if args.latest is True:
-        if tag(image_name_tag, image_name+':latest'):
-            push(args, image_name+':latest')
-
 def createParser():
     parser = argparse.ArgumentParser(
         description='Builds one of the docker images within this dockerfiles repo'
     )
-
-    parser.add_argument(
-        'image', help='The image name for building (parent folder)')
-
-    parser.add_argument(
-        'tag', help='The image tag for building (subfolder)')
-
-    parser.add_argument(
-        '--latest', action='store_true', help='Tag as latest (default false)')
-
-    parser.add_argument(
-        '--versiontag', action='store_true', help='Also tag with datetime stamp (default false)')
 
     parser.add_argument(
         '--nocache', action='store_true', help='Disable cache (default false)')
@@ -134,49 +121,37 @@ def main():
     parser = createParser()
     args = parser.parse_args()
 
-    # do build
-    target = args.image + '/' + args.tag
+    fileList = parseCommit()
+    dockerfiles = getDockerfiles(fileList)
 
     namespace = 'balassit'
 
-    image_name = namespace + '/' + args.image
-    image_name_tag = image_name + ':' + args.tag
+    for key, value in dockerfiles.items():
+        image = value[0]
+        tag = value[1]
+        image_name = namespace + '/' + image
+        image_name_tag = image_name + ':' + tag
+        target = image + '/' + tag
+        print(f"target: {target}")
+        build_args = read_dockerfile_for_args(target)
+        print(f"Building image {image_name_tag} with {len(build_args)} build_args:")
 
-    build_args = read_dockerfile_for_args(target)
+        build_arg_list = ""
+        for key in build_args:
+            print(f"  {key}={build_args[key]}")
+            build_arg_list = build_arg_list + f" --build-arg {key}={build_args[key]}"
 
-    if args.proxy:
-        build_args["http_proxy"] = os.environ.get("http_proxy")
-        build_args["https_proxy"] = os.environ.get("https_proxy")
-        build_args["no_proxy"] = os.environ.get("no_proxy")
-        build_args["HTTP_PROXY"] = os.environ.get("HTTP_PROXY")
-        build_args["HTTPS_PROXY"] = os.environ.get("HTTPS_PROXY")
-        build_args["NO_PROXY"] = os.environ.get("NO_PROXY")
+        build_cmd = f"docker build{'' if args.nopull else ' --pull'}{' --no-cache' if args.nocache else ''}{build_arg_list} --rm -t {image_name_tag} -f ./{target}/Dockerfile ./{target}"
 
-    print(f"Building image {image_name_tag} with {len(build_args)} build_args:")
+        print(f"COMMAND: {build_cmd}")
+        print("", flush=True)
 
-    build_arg_list = ""
-    for key in build_args:
-        print(f"  {key}={build_args[key]}")
-        build_arg_list = build_arg_list + f" --build-arg {key}={build_args[key]}"
+        return_code = subprocess.call(build_cmd, shell=True)
+        if return_code != 0:
+            exit(f"Error building with {build_cmd}")
 
-    build_cmd = f"docker build{'' if args.nopull else ' --pull'}{' --no-cache' if args.nocache else ''}{build_arg_list} --rm -t {image_name_tag} -f ./{target}/Dockerfile ./{target}"
-
-    print(f"COMMAND: {build_cmd}")
-    print("", flush=True)
-
-    return_code = subprocess.call(build_cmd, shell=True)
-    if return_code != 0:
-        exit(f"Error building with {build_cmd}")
-
-    # push with tag
-    push(args, image_name_tag)
-
-    # push with datetimestamp
-    do_version_tag(args, image_name_tag, image_name)
-
-    # push with latest
-    do_latest_tag(args, image_name_tag, image_name)
+        # push with tag
+        push(args, image_name_tag)
 
 if __name__ == '__main__':
-    install('colorama')
     main()
