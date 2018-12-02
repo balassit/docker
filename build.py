@@ -96,10 +96,33 @@ def push(args, image_name_tag):
             exit(f"Error with {cmd_push}")
     return 0
 
+
+def do_version_tag(args, image_name_tag, image_name):
+    """do version tag and push"""
+    if args.versiontag is True:
+        date_stamp = "{:%Y%m%d%H%M%S}".format(datetime.now())
+        version_tag = args.tag + '-' + date_stamp
+        image_name_version_tag = f"{image_name}:{version_tag}"
+        return_code = tag(image_name_tag, image_name_version_tag)
+        if return_code == 0:
+            push(args, image_name_version_tag)
+
+def do_latest_tag(args, image_name_tag, image_name):
+    """do latest tag and push"""
+    if args.latest is True:
+        if tag(image_name_tag, image_name+':latest'):
+            push(args, image_name+':latest')
+
 def createParser():
     parser = argparse.ArgumentParser(
         description='Builds one of the docker images within this dockerfiles repo'
     )
+
+    parser.add_argument(
+        '--latest', action='store_true', help='Tag as latest (default false)')
+
+    parser.add_argument(
+        '--versiontag', action='store_true', help='Also tag with datetime stamp (default false)')
 
     parser.add_argument(
         '--nocache', action='store_true', help='Disable cache (default false)')
@@ -152,6 +175,12 @@ def main():
 
         # push with tag
         push(args, image_name_tag)
+
+        # push with datetimestamp
+        do_version_tag(args, image_name_tag, image_name)
+
+        # push with latest
+        do_latest_tag(args, image_name_tag, image_name)
 
 if __name__ == '__main__':
     main()
